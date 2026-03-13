@@ -10,88 +10,82 @@ CORS(app)
 
 @app.route('/')
 def home():
-    return "Lightning Fast API Scraper is awake!"
+    return "MarkDocx-Level API Scraper is awake!"
 
 @app.route('/scrape-link', methods=['POST'])
 def scrape_link():
     data = request.get_json()
-    url = data.get('url')
+    url = data.get('url', '')
 
     if not url or ('chatgpt.com' not in url and 'gemini.google.com' not in url and 'g.co/gemini' not in url):
         return jsonify({"error": "Invalid URL."}), 400
 
-    # Disguise our instant request as a normal browser
+    # Ultimate Browser Spoofing Headers to bypass standard Google bot-blocks
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Accept-Language": "en-US,en;q=0.9"
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Accept-Encoding": "gzip, deflate, br",
+        "Connection": "keep-alive",
+        "Upgrade-Insecure-Requests": "1",
+        "Sec-Fetch-Dest": "document",
+        "Sec-Fetch-Mode": "navigate",
+        "Sec-Fetch-Site": "none",
+        "Sec-Fetch-User": "?1"
     }
 
+    formatted_conversations = []
+
     try:
-        # Fetch the raw HTML instantly (takes ~0.5 seconds)
-        res = requests.get(url, headers=headers, timeout=10)
-        res.raise_for_status()
-        html = res.text
-        final_url = res.url
-        
-        formatted_conversations = []
-
-        # --- CHATGPT FAST JSON PARSER ---
-        if 'chatgpt.com' in final_url:
-            soup = BeautifulSoup(html, 'html.parser')
-            # ChatGPT stores the entire conversation in a hidden JSON script tag
-            script = soup.find('script', id='__NEXT_DATA__')
-            if script:
-                try:
-                    data = json.loads(script.string)
-                    messages = []
-                    
-                    # Algorithm to deep-search the JSON tree for messages
-                    def find_messages(obj):
-                        if isinstance(obj, dict):
-                            if 'message' in obj and isinstance(obj['message'], dict) and 'author' in obj['message']:
-                                messages.append(obj['message'])
-                            for k, v in obj.items():
-                                find_messages(v)
-                        elif isinstance(obj, list):
-                            for item in obj:
-                                find_messages(item)
-                    
-                    find_messages(data)
-                    
-                    current_prompt = "AI Response"
-                    for msg in messages:
-                        role = msg.get('author', {}).get('role')
-                        parts = msg.get('content', {}).get('parts', [])
-                        if not parts or not isinstance(parts[0], str): continue
-                        
-                        text = parts[0].strip()
-                        if not text: continue
-                        
-                        # Match user prompts to AI responses
-                        if role == 'user':
-                            current_prompt = text[:60].replace('\n', ' ') + "..."
-                        elif role == 'assistant':
-                            formatted_conversations.append({
-                                "snippet": f"👤 {current_prompt}",
-                                "text": text
-                            })
-                            current_prompt = "AI Response"
-                except Exception as e:
-                    print("JSON parse error:", e)
+        # --- 1. CHATGPT HIDDEN API BYPASS ---
+        if 'chatgpt.com' in url:
+            # Extract the unique Share ID from the URL
+            match = re.search(r'/share/([a-zA-Z0-9-]+)', url)
+            if not match:
+                return jsonify({"error": "Could not find ChatGPT Share ID in the link."}), 400
             
-            # Fast Fallback if JSON fails
-            if not formatted_conversations:
-                for el in soup.find_all('div', class_=re.compile(r'markdown|prose')):
-                    text = el.get_text(separator='\n').strip()
-                    if text:
-                        formatted_conversations.append({
-                            "snippet": text[:60].replace('\n', ' ') + "...",
-                            "text": text
-                        })
+            share_id = match.group(1)
+            
+            # Hit the hidden backend API directly to bypass the HTML Cloudflare screen!
+            api_url = f"https://chatgpt.com/backend-api/shared_conversations/{share_id}"
+            
+            res = requests.get(api_url, headers=headers, timeout=10)
+            res.raise_for_status()
+            
+            # The API returns a perfect JSON dictionary
+            json_data = res.json()
+            mapping = json_data.get('mapping', {})
+            
+            current_prompt = "AI Response"
+            
+            # Loop through all messages in the conversation
+            for node in mapping.values():
+                message = node.get('message')
+                if not message: continue
+                
+                author_role = message.get('author', {}).get('role')
+                parts = message.get('content', {}).get('parts', [])
+                
+                if not parts or not isinstance(parts[0], str): continue
+                text = parts[0].strip()
+                if not text: continue
+                
+                if author_role == 'user':
+                    current_prompt = text[:60].replace('\n', ' ') + "..."
+                elif author_role == 'assistant':
+                    formatted_conversations.append({
+                        "snippet": f"👤 {current_prompt}",
+                        "text": text
+                    })
+                    current_prompt = "AI Response"
 
-        # --- GEMINI FAST REGEX PARSER ---
-        elif 'gemini.google.com' in final_url or 'g.co/gemini' in final_url:
-            # Gemini hides text inside massive nested arrays. We rip out all strings.
+        # --- 2. GEMINI DEEP REGEX BYPASS ---
+        elif 'gemini.google.com' in url or 'g.co/gemini' in url:
+            res = requests.get(url, headers=headers, timeout=10)
+            res.raise_for_status()
+            html = res.text
+            
+            # Grab all massive strings hidden in Google's JavaScript arrays
             strings = re.findall(r'"((?:\\.|[^"\\])*)"', html)
             
             current_prompt = "Gemini Response"
@@ -101,20 +95,21 @@ def scrape_link():
                 except:
                     clean_s = s.replace('\\n', '\n').replace('\\"', '"')
                     
-                # Heuristic: AI responses are long and usually contain double newlines or markdown
+                # Look for long Markdown structures (AI Responses)
                 if len(clean_s) > 100 and '\n\n' in clean_s and ('**' in clean_s or '*' in clean_s or '`' in clean_s):
                     formatted_conversations.append({
                         "snippet": f"✨ {current_prompt}",
                         "text": clean_s
                     })
                     current_prompt = "Gemini Response" 
-                # Heuristic: User prompts are shorter and don't look like code
+                # Look for shorter strings without code (User Prompts)
                 elif 5 < len(clean_s) < 200 and '{' not in clean_s and '[' not in clean_s:
                     if '\\u' not in s and '_' not in clean_s: 
                         current_prompt = clean_s[:60].replace('\n', ' ') + "..."
 
+        # If it STILL failed, tell us exactly what error code the server threw
         if not formatted_conversations:
-            return jsonify({"error": "Format changed or AI blocked the request. Try another link."}), 404
+            return jsonify({"error": f"Bot protection blocked the request. Try exporting to Word directly from the AI."}), 403
 
         # Prepare for the Blogger checkboxes
         for i, conv in enumerate(formatted_conversations):
